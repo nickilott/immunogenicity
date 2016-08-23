@@ -96,7 +96,9 @@ import numpy as np
 ###################################################
 
 # load options from the config file
+
 import CGATPipelines.Pipeline as P
+
 P.getParameters( 
     [ "pipeline.ini" ] )
 
@@ -128,40 +130,21 @@ def predictEpitope(infile, outfile):
     '''
     allele=PARAMS.get("prediction_allele")
     method=PARAMS.get("prediction_method")
-    tempfile=os.path.join(os.path.dirname(outfile), os.path.basename(infile)) + ".tmp"
+    seq_name=P.snip(os.path.basename(infile), ".fasta")
+    scriptsdir=PARAMS.get("scriptsdir")
 
-    statement="""/usr/local/bin/python2.7 /home/nilott/apps/src/mhc_ii/mhc_II_binding.py \
-                                       %(method)s \
-                                       %(allele)s \
-                                       %(infile)s \
-                                       > %(tempfile)s""" % locals()
+    # This is very strange but mhc_II_binding.py does not
+    # run using P.run(). Not sure why...very problematic for
+    # parallelisation
+    statement="""mhc_II_binding.py \
+                 %(method)s \
+                 %(allele)s \
+                 %(infile)s \
+                 | python %(scriptsdir)s/predictions2minimumic50.py \
+                 --seq-name=%(seq_name)s \
+                 --log=%(outfile)s.log \
+                 > %(outfile)s""" % locals()
     os.system(statement)
-    peptide2data = {}
-    
-    # store ic50 values
-    ics = []
-    res = IOTools.openFile(tempfile)
-    header = res.readline()
-    seq_id = P.snip(os.path.basename(infile), ".fasta")
-    for line in res.readlines():
-        data = line[:-1].split("\t")
-        allele, seq_num, start, end, core_peptide, peptide, ic50 = data
-        peptide2data[peptide] = [seq_num, start, end, core_peptide, peptide, ic50]
-        ics.append(ic50)
-
-    # get the peptide with the minimum predicted IC50
-    min_ic50 = min(ics)
-    outf = open(outfile, "w")
-    outf.write("%s\tseq_id\n" % header[:-1])
-    for peptide, dat in peptide2data.iteritems():
-        ic50 = dat[-1]
-        if ic50 != min_ic50: 
-            continue
-        else:
-          outf.write("\t".join([peptide] + dat + [seq_id]) + "\n") 
-    outf.close()
-    os.unlink(tempfile)
-
 
 ###################################################
 ###################################################
@@ -173,9 +156,16 @@ def aggregatePredictions(infiles, outfile):
     concatenate the individual predictions
     '''
     infs = " ".join(infiles)
-    statement = """awk 'FNR==1 && NR !=1 { while (/^allele/) getline; } 1 {print}' prediction.dir/*.pred | gzip > %s""" % outfile
-    os.system(statement)
+    statement = '''awk 'FNR==1 && NR !=1 { while (/^allele/) getline; } 1 {print}' prediction.dir/*.pred | gzip > %(outfile)s'''
+    P.run()
 
+###################################################
+###################################################
+###################################################
+
+@follows(aggregatePredictions)
+def full():
+    pass
 
 
 if __name__== "__main__":
